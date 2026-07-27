@@ -1,0 +1,101 @@
+name: Nikkei VI Teams notifier
+
+on:
+  schedule:
+    # The official VI daily CSV was observed updating ~18:24 JST (the close
+    # itself is fixed ~15:50), so 19:00 JST is the first safe slot. GitHub's
+    # cron is best-effort — often late, sometimes dropped — so we retry a few
+    # times; the script de-dups by rate date and posts each day exactly once.
+    #
+    # All slots stay before 22:30 JST (the US cash open) on purpose: after that,
+    # Yahoo's newest daily bar for VIX/S&P500 is an in-progress session, which
+    # would be reported as if it were a close.
+    #   10:00 UTC = 19:00 JST  (primary)
+    #   11:00 UTC = 20:00 JST
+    #   12:00 UTC = 21:00 JST
+    #   12:45 UTC = 21:45 JST  (last safe slot)
+    - cron: "0 10 * * 1-5"
+    - cron: "0 11 * * 1-5"
+    - cron: "0 12 * * 1-5"
+    - cron: "45 12 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      always_post:
+        description: "Post the latest VI even if it was already posted"
+        type: boolean
+        default: false
+
+concurrency:
+  group: vi-notify
+  cancel-in-progress: false
+
+permissions:
+  contents: write            # to commit the chart PNG and the de-dup state
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Fetch data, build chart and card
+        id: prep
+        env:
+          ALWAYS_POST: ${{ inputs.always_post && '1' || '' }}
+          STATE_FILE: state/last_posted.txt
+          CHART_PATH: charts/latest.png
+          # Teams can only render an image from a public URL, hence this repo
+          # being public and the chart being committed on every update.
+          CHART_URL_BASE: https://raw.githubusercontent.com/${{ github.repository }}/${{ github.ref_name }}/charts/latest.png
+        run: |
+          python vi_bot.py --prepare
+          if [ -f out/card.json ]; then
+            echo "prepared=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prepared=false" >> "$GITHUB_OUTPUT"
+            echo "nothing new to post"
+          fi
+
+      # The chart must be live at its URL *before* Teams renders the card,
+      # otherwise the image comes through broken.
+      - name: Publish chart
+        if: ${{ steps.prep.outputs.prepared == 'true' }}
+        run: |
+          git config user.name "vi-bot"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if [ -n "$(git status --porcelain charts/latest.png)" ]; then
+            git add charts/latest.png
+            git commit -m "chart: update Nikkei VI chart [skip ci]"
+            git push
+            echo "chart published"
+          else
+            echo "chart unchanged"
+          fi
+
+      - name: Post to Teams
+        if: ${{ steps.prep.outputs.prepared == 'true' }}
+        env:
+          TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
+          STATE_FILE: state/last_posted.txt
+        run: python vi_bot.py --post
+
+      - name: Persist de-dup state
+        if: ${{ steps.prep.outputs.prepared == 'true' }}
+        run: |
+          if [ -n "$(git status --porcelain state/last_posted.txt)" ]; then
+            git add state/last_posted.txt
+            git commit -m "chore: record last posted VI date [skip ci]"
+            git push
+            echo "state updated"
+          else
+            echo "no state change"
+          fi
