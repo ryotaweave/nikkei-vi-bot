@@ -265,13 +265,20 @@ def analyse():
 # ----------------------------------------------------------------------- chart
 
 def make_chart(a, path, days=120):
-    """VI line with the Nikkei 225 overlaid; English labels avoid CJK font deps."""
+    """
+    VI line with the Nikkei 225 overlaid; English labels avoid CJK font deps.
+
+    Sized for legibility as a Teams *thumbnail*: Teams scales the image down to
+    roughly 450px wide, so what matters is text size relative to figure width,
+    not absolute pixels. A small figsize with a high dpi gives large relative
+    text while still producing a big, crisp image for the click-to-zoom view.
+    """
     vi = a["vi_series"][-days:]
     start = vi[0][0]
     nk = [(d, c) for d, c in a["n225_series"] if d >= start]
     ohlc = {d: (h, l) for d, _c, _o, h, l in a["vi_ohlc"] if d >= start}
 
-    fig, ax = plt.subplots(figsize=(9, 4), dpi=110)
+    fig, ax = plt.subplots(figsize=(7.0, 3.7), dpi=180)
     fig.patch.set_facecolor("white")
 
     vd = [d for d, _ in vi]
@@ -281,45 +288,46 @@ def make_chart(a, path, days=120):
     # the close alone understates the day's actual range.
     if all(d in ohlc for d in vd):
         ax.fill_between(vd, [ohlc[d][0] for d in vd], [ohlc[d][1] for d in vd],
-                        color="#c2185b", alpha=0.13, linewidth=0, zorder=1,
+                        color="#c2185b", alpha=0.14, linewidth=0, zorder=1,
                         label="intraday range")
 
-    ax.plot(vd, vc, color="#c2185b", linewidth=1.9, zorder=3, label="VI close")
+    ax.plot(vd, vc, color="#c2185b", linewidth=2.4, zorder=3, label="VI close")
 
     med = statistics.median([c for _, c in a["vi_series"][-250:]])
-    ax.axhline(med, color="#9e9e9e", linestyle="--", linewidth=1,
+    ax.axhline(med, color="#757575", linestyle="--", linewidth=1.3,
                zorder=1, label=f"1y median {med:.1f}")
 
     # highlight the latest point
-    ax.scatter([vd[-1]], [vc[-1]], s=42, color="#c2185b", zorder=5,
-               edgecolor="white", linewidth=1.4)
+    ax.scatter([vd[-1]], [vc[-1]], s=70, color="#c2185b", zorder=5,
+               edgecolor="white", linewidth=1.8)
     ax.annotate(f"{vc[-1]:.2f}", (vd[-1], vc[-1]), textcoords="offset points",
-                xytext=(8, 6), fontsize=11, fontweight="bold", color="#c2185b")
+                xytext=(9, 7), fontsize=15, fontweight="bold", color="#c2185b")
 
-    ax.set_ylabel("VI (implied volatility, %)", fontsize=9, color="#c2185b")
-    ax.tick_params(axis="y", labelcolor="#c2185b", labelsize=8)
-    ax.tick_params(axis="x", labelsize=8)
-    ax.grid(True, alpha=0.22, linewidth=0.7)
+    ax.set_ylabel("VI  (implied vol, %)", fontsize=12, color="#c2185b")
+    ax.tick_params(axis="y", labelcolor="#c2185b", labelsize=11.5)
+    ax.tick_params(axis="x", labelsize=11.5)
+    ax.grid(True, alpha=0.25, linewidth=0.9)
     ax.set_axisbelow(True)
 
     ax2 = ax.twinx()
     ax2.plot([d for d, _ in nk], [c for _, c in nk],
-             color="#1565c0", linewidth=1.3, alpha=0.75, zorder=2,
+             color="#1565c0", linewidth=1.8, alpha=0.8, zorder=2,
              label="Nikkei 225 (right)")
-    ax2.set_ylabel("Nikkei 225", fontsize=9, color="#1565c0")
-    ax2.tick_params(axis="y", labelcolor="#1565c0", labelsize=8)
+    ax2.set_ylabel("Nikkei 225", fontsize=12, color="#1565c0")
+    ax2.tick_params(axis="y", labelcolor="#1565c0", labelsize=11.5)
+    ax2.ticklabel_format(axis="y", style="plain")
 
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %d"))
-    ax.xaxis.set_major_locator(mdates.AutoDateLocator(maxticks=8))
+    ax.xaxis.set_major_locator(mdates.AutoDateLocator(maxticks=6))
 
-    ax.set_title(f"Nikkei 225 Volatility Index  —  {a['date']:%Y/%m/%d} close "
+    ax.set_title(f"Nikkei 225 VI — {a['date']:%Y/%m/%d}  "
                  f"{a['close']:.2f} ({fmt_signed(a['chg_pct'], 2, '%')})",
-                 fontsize=11.5, fontweight="bold", loc="left", pad=10)
+                 fontsize=14.5, fontweight="bold", loc="left", pad=9)
 
     h1, l1 = ax.get_legend_handles_labels()
     h2, l2 = ax2.get_legend_handles_labels()
-    ax.legend(h1 + h2, l1 + l2, loc="upper left", fontsize=8,
-              framealpha=0.9, ncol=3)
+    ax.legend(h1 + h2, l1 + l2, loc="upper left", fontsize=10,
+              framealpha=0.92, ncol=2, borderpad=0.5, handlelength=1.6)
 
     for s in ("top",):
         ax.spines[s].set_visible(False)
@@ -401,9 +409,25 @@ def build_card(a, chart_url):
                  "示すものではありません。判断はご自身で行ってください。"},
     ]
 
+    actions = [{"type": "Action.OpenUrl", "title": "日経公式ページを開く",
+                "url": VI_PAGE}]
+
     if chart_url:
-        body.append({"type": "Image", "url": chart_url, "size": "Stretch",
-                     "altText": "日経平均VIと日経225の推移", "spacing": "Medium"})
+        # Teams renders the image as a ~450px thumbnail. selectAction makes the
+        # image itself clickable (opens the full-resolution PNG); the button is a
+        # fallback because image selectAction is ignored on some Teams clients.
+        body.append({
+            "type": "Image", "url": chart_url, "size": "Stretch",
+            "altText": "日経平均VIと日経225の推移（クリックで拡大）",
+            "spacing": "Medium",
+            "selectAction": {"type": "Action.OpenUrl", "title": "グラフを拡大",
+                             "url": chart_url},
+        })
+        body.append({"type": "TextBlock", "size": "Small", "isSubtle": True,
+                     "spacing": "None", "wrap": True,
+                     "text": "↑ グラフをクリックすると拡大表示されます"})
+        actions.insert(0, {"type": "Action.OpenUrl", "title": "グラフを拡大表示",
+                           "url": chart_url})
 
     return {
         "type": "message",
@@ -414,8 +438,7 @@ def build_card(a, chart_url):
                 "type": "AdaptiveCard",
                 "version": "1.4",
                 "body": body,
-                "actions": [{"type": "Action.OpenUrl", "title": "日経公式ページを開く",
-                             "url": VI_PAGE}],
+                "actions": actions,
             },
         }],
     }
@@ -474,8 +497,15 @@ def main():
 
         make_chart(a, chart_path)
 
+        # Cache-bust on the image's own content, not just the date: Teams (and
+        # the raw CDN) key on the URL, so regenerating a chart for the same date
+        # would otherwise keep showing the previously cached picture.
+        import hashlib
+        with open(chart_path, "rb") as f:
+            digest = hashlib.md5(f.read()).hexdigest()[:10]
+
         base = os.environ.get("CHART_URL_BASE", "").strip()
-        chart_url = f"{base}?v={a['date']:%Y%m%d}" if base else ""
+        chart_url = f"{base}?v={a['date']:%Y%m%d}-{digest}" if base else ""
         if not chart_url:
             log("note: CHART_URL_BASE unset — card will have no image "
                 "(set it in CI so Teams can fetch the PNG)")
