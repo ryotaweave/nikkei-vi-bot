@@ -264,16 +264,24 @@ def analyse():
 
 # ----------------------------------------------------------------------- chart
 
-def make_chart(a, path, days=120):
+def make_chart(a, path, cal_days=None):
     """
     VI line with the Nikkei 225 overlaid; English labels avoid CJK font deps.
+
+    Window is calendar-based (default: the last month) so the x-axis always
+    spans a predictable period regardless of holidays.
 
     Sized for legibility as a Teams *thumbnail*: Teams scales the image down to
     roughly 450px wide, so what matters is text size relative to figure width,
     not absolute pixels. A small figsize with a high dpi gives large relative
     text while still producing a big, crisp image for the click-to-zoom view.
     """
-    vi = a["vi_series"][-days:]
+    if cal_days is None:
+        cal_days = int(os.environ.get("CHART_DAYS", "31"))
+    cutoff = a["date"] - dt.timedelta(days=cal_days)
+    vi = [(d, c) for d, c in a["vi_series"] if d >= cutoff]
+    if len(vi) < 2:                      # pathological (long market closure)
+        vi = a["vi_series"][-10:]
     start = vi[0][0]
     nk = [(d, c) for d, c in a["n225_series"] if d >= start]
     ohlc = {d: (h, l) for d, _c, _o, h, l in a["vi_ohlc"] if d >= start}
@@ -291,7 +299,10 @@ def make_chart(a, path, days=120):
                         color="#c2185b", alpha=0.14, linewidth=0, zorder=1,
                         label="intraday range")
 
-    ax.plot(vd, vc, color="#c2185b", linewidth=2.4, zorder=3, label="VI close")
+    # few enough points now that per-day markers are readable
+    ax.plot(vd, vc, color="#c2185b", linewidth=2.4, zorder=3, label="VI close",
+            marker="o", markersize=4.5, markerfacecolor="white",
+            markeredgewidth=1.5)
 
     med = statistics.median([c for _, c in a["vi_series"][-250:]])
     ax.axhline(med, color="#757575", linestyle="--", linewidth=1.3,
@@ -301,7 +312,10 @@ def make_chart(a, path, days=120):
     ax.scatter([vd[-1]], [vc[-1]], s=70, color="#c2185b", zorder=5,
                edgecolor="white", linewidth=1.8)
     ax.annotate(f"{vc[-1]:.2f}", (vd[-1], vc[-1]), textcoords="offset points",
-                xytext=(9, 7), fontsize=15, fontweight="bold", color="#c2185b")
+                xytext=(0, 14), ha="center", fontsize=14.5, fontweight="bold",
+                color="#c2185b", zorder=6,
+                bbox=dict(boxstyle="round,pad=0.18", facecolor="white",
+                          edgecolor="none", alpha=0.85))
 
     ax.set_ylabel("VI  (implied vol, %)", fontsize=12, color="#c2185b")
     ax.tick_params(axis="y", labelcolor="#c2185b", labelsize=11.5)
@@ -317,17 +331,24 @@ def make_chart(a, path, days=120):
     ax2.tick_params(axis="y", labelcolor="#1565c0", labelsize=11.5)
     ax2.ticklabel_format(axis="y", style="plain")
 
-    ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %d"))
-    ax.xaxis.set_major_locator(mdates.AutoDateLocator(maxticks=6))
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%m/%d"))
+    ax.xaxis.set_major_locator(mdates.WeekdayLocator(byweekday=mdates.MO))
+    ax.xaxis.set_minor_locator(mdates.DayLocator())
+    # breathing room on the right so the latest-value label doesn't collide
+    # with the Nikkei axis ticks
+    ax.set_xlim(vd[0] - dt.timedelta(days=1), vd[-1] + dt.timedelta(days=3))
 
     ax.set_title(f"Nikkei 225 VI — {a['date']:%Y/%m/%d}  "
                  f"{a['close']:.2f} ({fmt_signed(a['chg_pct'], 2, '%')})",
                  fontsize=14.5, fontweight="bold", loc="left", pad=9)
 
+    # Legend goes *below* the axes: with only ~21 points an in-plot legend box
+    # sits right on top of the data.
     h1, l1 = ax.get_legend_handles_labels()
     h2, l2 = ax2.get_legend_handles_labels()
-    ax.legend(h1 + h2, l1 + l2, loc="upper left", fontsize=10,
-              framealpha=0.92, ncol=2, borderpad=0.5, handlelength=1.6)
+    ax.legend(h1 + h2, l1 + l2, loc="upper center", bbox_to_anchor=(0.5, -0.13),
+              fontsize=10, ncol=4, frameon=False, handlelength=1.8,
+              columnspacing=1.4)
 
     for s in ("top",):
         ax.spines[s].set_visible(False)
