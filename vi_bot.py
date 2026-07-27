@@ -459,8 +459,6 @@ def main():
     chart_path = os.environ.get("CHART_PATH", "charts/latest.png")
     always = os.environ.get("ALWAYS_POST", "").strip() in ("1", "true", "True")
     webhook = os.environ.get("TEAMS_WEBHOOK_URL", "").strip()
-    if not webhook:
-        dry = True
 
     if prepare:
         a = analyse()
@@ -497,6 +495,10 @@ def main():
     if post:
         if not os.path.exists(CARD_JSON):
             log("nothing prepared (no new data) — skipping post.")
+            return 0
+        if not webhook:
+            log("TEAMS_WEBHOOK_URL not set — skipping post "
+                "(card is ready in out/card.json).")
             return 0
         with open(CARD_JSON, encoding="utf-8") as f:
             payload = json.load(f)
