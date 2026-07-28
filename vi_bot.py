@@ -59,12 +59,13 @@ VI_CSV = "https://indexes.nikkei.co.jp/nkave/historical/nikkei_stock_average_vi_
 N225_CSV = "https://indexes.nikkei.co.jp/nkave/historical/nikkei_stock_average_daily_jp.csv"
 VI_PAGE = "https://indexes.nikkei.co.jp/nkave/index/profile?idx=nk225vi"
 
-# label, yahoo symbol, kind ("pct" -> show % change, "bp" -> yield in bp)
+# label, yahoo symbol, fmt ("pct" -> % change, "bp" -> yield in bp), market
+# market decides when a daily bar counts as finished (see drop_incomplete_session)
 MACRO = [
-    ("ドル円", "USDJPY=X", "pct"),
-    ("米VIX", "^VIX", "pct"),
-    ("S&P500", "^GSPC", "pct"),
-    ("米10年金利", "^TNX", "bp"),
+    ("ドル円", "USDJPY=X", "pct", "fx"),
+    ("米VIX", "^VIX", "pct", "us"),
+    ("S&P500", "^GSPC", "pct", "us"),
+    ("米10年金利", "^TNX", "bp", "us"),
 ]
 
 CARD_JSON = "out/card.json"
@@ -100,23 +101,57 @@ def fetch_nikkei_csv(url):
     return rows
 
 
+def drop_incomplete_session(series, market):
+    """
+    Remove a still-forming daily bar.
+
+    Yahoo happily returns a bar for the session in progress, so a run while the
+    market is open would otherwise report an intraday tick as that day's close.
+    We can't key this off *when* the job runs — GitHub's cron is routinely hours
+    late — so completeness is decided here rather than by the schedule.
+
+    "us"  : cash session ends 16:00 ET.
+    "fx"  : no daily close as such; the London trading day (which is how Yahoo
+            buckets FX bars) ends 23:00 UTC, so today's bar is never finished.
+    """
+    if not series:
+        return series
+    if market == "us":
+        now = dt.datetime.now(ZoneInfo("America/New_York"))
+        finished_today = now.time() >= dt.time(16, 5)
+    else:
+        now = dt.datetime.now(ZoneInfo("Europe/London"))
+        finished_today = False
+    today = now.date()
+    return [(d, c) for d, c in series
+            if d < today or (d == today and finished_today)]
+
+
 def fetch_yahoo(symbol, rng="1mo"):
-    """Return [(date, close), ...] oldest-first, or [] on failure."""
+    """
+    Return [(session_date, close), ...] oldest-first, or [] on failure.
+
+    Dates come from the *exchange's own* timezone, not UTC. Yahoo stamps each
+    daily bar at the start of the trading day, which for FX is 23:00 UTC the
+    evening before — reading that as a UTC date labels every FX observation one
+    day early.
+    """
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
     try:
         r = requests.get(url, headers=UA, timeout=30,
                          params={"range": rng, "interval": "1d"})
         r.raise_for_status()
         res = r.json()["chart"]["result"][0]
+        tz = ZoneInfo(res.get("meta", {}).get("exchangeTimezoneName") or "UTC")
         ts = res["timestamp"]
         closes = res["indicators"]["quote"][0]["close"]
-        out = []
+        by_date = {}                     # a live partial bar can share a date
         for t, c in zip(ts, closes):
             if c is None:
                 continue
-            d = dt.datetime.fromtimestamp(t, dt.timezone.utc).date()
-            out.append((d, float(c)))
-        return out
+            d = dt.datetime.fromtimestamp(t, dt.timezone.utc).astimezone(tz).date()
+            by_date[d] = float(c)        # later timestamp wins
+        return sorted(by_date.items())
     except Exception as e:                      # a missing comparator must not
         log(f"WARNING: macro fetch failed for {symbol}: {e}")
         return []                              # kill the whole notification
@@ -225,8 +260,8 @@ def analyse():
 
     # macro comparators
     macro = []
-    for label, sym, kind in MACRO:
-        series = fetch_yahoo(sym)
+    for label, sym, kind, market in MACRO:
+        series = drop_incomplete_session(fetch_yahoo(sym), market)
         if len(series) < 2:
             continue
         m_d, m_c = series[-1]

@@ -2,22 +2,26 @@ name: Nikkei VI Teams notifier
 
 on:
   schedule:
-    # The official VI daily CSV was observed updating ~18:24 JST (the close
-    # itself is fixed ~15:50), so 19:00 JST is the first safe slot. GitHub's
-    # cron is best-effort — often late, sometimes dropped — so we retry a few
-    # times; the script de-dups by rate date and posts each day exactly once.
+    # The official VI daily CSV updates ~16:10-18:25 JST (the close itself is
+    # fixed ~15:50), so 19:00 JST is the first reliable slot.
     #
-    # All slots stay before 22:30 JST (the US cash open) on purpose: after that,
-    # Yahoo's newest daily bar for VIX/S&P500 is an in-progress session, which
-    # would be reported as if it were a close.
-    #   10:00 UTC = 19:00 JST  (primary)
-    #   11:00 UTC = 20:00 JST
-    #   12:00 UTC = 21:00 JST
-    #   12:45 UTC = 21:45 JST  (last safe slot)
+    # GitHub's cron is best-effort and in practice runs *hours* late and drops
+    # slots outright (observed 2026-07-28: a 16:00 JST slot ran at 22:15, and
+    # half the day's slots never fired). So we spread many attempts across the
+    # evening and let the script de-dup by rate date — whichever attempt lands
+    # first posts, the rest exit quietly.
+    #
+    # Running late is safe for the macro panel: completeness of the US session
+    # is decided in code (drop_incomplete_session), not by the schedule.
+    #   10:00 UTC = 19:00 JST  (primary)   13:00 UTC = 22:00 JST
+    #   11:00 UTC = 20:00 JST              14:00 UTC = 23:00 JST
+    #   12:00 UTC = 21:00 JST              15:00 UTC = 00:00 JST (next day)
     - cron: "0 10 * * 1-5"
     - cron: "0 11 * * 1-5"
     - cron: "0 12 * * 1-5"
-    - cron: "45 12 * * 1-5"
+    - cron: "0 13 * * 1-5"
+    - cron: "0 14 * * 1-5"
+    - cron: "0 15 * * 1-5"
   workflow_dispatch:
     inputs:
       always_post:
