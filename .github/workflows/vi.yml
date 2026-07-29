@@ -13,15 +13,21 @@ on:
     #
     # Running late is safe for the macro panel: completeness of the US session
     # is decided in code (drop_incomplete_session), not by the schedule.
-    #   10:00 UTC = 19:00 JST  (primary)   13:00 UTC = 22:00 JST
-    #   11:00 UTC = 20:00 JST              14:00 UTC = 23:00 JST
-    #   12:00 UTC = 21:00 JST              15:00 UTC = 00:00 JST (next day)
-    - cron: "0 10 * * 1-5"
-    - cron: "0 11 * * 1-5"
-    - cron: "0 12 * * 1-5"
-    - cron: "0 13 * * 1-5"
-    - cron: "0 14 * * 1-5"
-    - cron: "0 15 * * 1-5"
+    # Minutes are deliberately odd. GitHub documents that schedules landing on
+    # the hour (and :30) are delayed the most, because everyone picks them —
+    # using :00 everywhere is what made this worst-case.
+    #   07:37 UTC = 16:37 JST  (early try; CSV is sometimes ready by ~16:10)
+    #   09:23 UTC = 18:23 JST
+    #   09:53 UTC = 18:53 JST  (primary: CSV usually updated by ~18:25)
+    #   11:11 UTC = 20:11 JST
+    #   12:41 UTC = 21:41 JST
+    #   14:07 UTC = 23:07 JST  (last chance before JST midnight)
+    - cron: "37 7 * * 1-5"
+    - cron: "23 9 * * 1-5"
+    - cron: "53 9 * * 1-5"
+    - cron: "11 11 * * 1-5"
+    - cron: "41 12 * * 1-5"
+    - cron: "7 14 * * 1-5"
   workflow_dispatch:
     inputs:
       always_post:
