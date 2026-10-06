@@ -5,28 +5,23 @@ on:
     # The official VI daily CSV updates ~16:10-18:25 JST (the close itself is
     # fixed ~15:50), so 19:00 JST is the first reliable slot.
     #
-    # GitHub's cron is best-effort and in practice runs *hours* late and drops
-    # slots outright (observed 2026-07-28: a 16:00 JST slot ran at 22:15, and
-    # half the day's slots never fired). So we spread many attempts across the
-    # evening and let the script de-dup by rate date — whichever attempt lands
-    # first posts, the rest exit quietly.
+    # The PC's Task Scheduler dispatches this workflow at 18:55 JST and is what
+    # actually delivers on time; GitHub's cron is only a safety net for days the
+    # PC is off or its token has expired. Cron is best-effort and in practice
+    # runs *hours* late or drops slots entirely (observed repeatedly, and on
+    # 2026-10-05 a slot was cancelled outright with "job was not acquired by
+    # Runner of type hosted"), so extra slots buy nothing but noise.
+    #
+    # Both slots sit AFTER the 09:55 UTC dispatch on purpose: a punctual cron
+    # ahead of it would pre-empt the PC trigger and take back control of the
+    # delivery time. Odd minutes because :00 and :30 are delayed the most.
     #
     # Running late is safe for the macro panel: completeness of the US session
-    # is decided in code (drop_incomplete_session), not by the schedule.
-    # Minutes are deliberately odd. GitHub documents that schedules landing on
-    # the hour (and :30) are delayed the most, because everyone picks them —
-    # using :00 everywhere is what made this worst-case.
-    #   07:37 UTC = 16:37 JST  (early try; CSV is sometimes ready by ~16:10)
-    #   09:23 UTC = 18:23 JST
-    #   09:53 UTC = 18:53 JST  (primary: CSV usually updated by ~18:25)
-    #   11:11 UTC = 20:11 JST
-    #   12:41 UTC = 21:41 JST
+    # is decided in code (drop_incomplete_session), not by the schedule, and the
+    # script de-dups by rate date so a late slot simply exits.
+    #   11:11 UTC = 20:11 JST  (safety net if the PC missed 18:55)
     #   14:07 UTC = 23:07 JST  (last chance before JST midnight)
-    - cron: "37 7 * * 1-5"
-    - cron: "23 9 * * 1-5"
-    - cron: "53 9 * * 1-5"
     - cron: "11 11 * * 1-5"
-    - cron: "41 12 * * 1-5"
     - cron: "7 14 * * 1-5"
   workflow_dispatch:
     inputs:
